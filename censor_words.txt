@@ -1,0 +1,37 @@
+# Censor Words List
+#
+# One word per line. Lines starting with '#' are comments.
+# Blank lines are ignored. Matching is case-insensitive.
+#
+# Match modes:
+#   word      whole word + derivatives (plural, past tense, -ing, possessive)
+#             Example: 'run' also matches 'ran', 'running', 'runs'
+#             Compound words are NOT matched: 'ass' does NOT match 'class'.
+#
+#   *word*    substring anywhere in the token (matches compounds too)
+#             Example: '*fuck*' matches 'fuck', 'fucked', 'fucking',
+#                      'fucktard', 'motherfucker', 'clusterfuck'
+#
+#   word*     token starts with 'word'
+#             Example: 'fuck*' matches 'fuck', 'fucker', 'fucktard'
+#
+#   *word     token ends with 'word'
+#             Example: '*fuck' matches 'fuck', 'motherfuck', 'clusterfuck'
+#
+# Use wildcard modes carefully -- they can over-censor
+# (e.g., '*ass*' would mute 'class', 'grass', 'passage', etc.).
+#
+# Examples (edit or replace freely):
+*fuck*
+cunt
+shit
+bullshit
+*bitch*
+bastard
+*damn*
+hell
+asshole
+dick*
+jesus christ
+jesus
+christ

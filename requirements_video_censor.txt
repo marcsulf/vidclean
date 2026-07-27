@@ -1,0 +1,39 @@
+# Video Audio Censor Tool — Python requirements
+#
+# NOTE: ffmpeg (and ffprobe) must also be installed and on the system PATH.
+#       Install from https://www.gyan.dev/ffmpeg/builds/ on Windows or via
+#       your package manager on Linux / macOS.
+#
+# NOTE: Install torch FIRST, from the correct PyTorch index URL for your
+#       Python version and CUDA driver, e.g.:
+#
+#           # GPU, CUDA 12.4 (recommended for most modern NVIDIA drivers,
+#           #                 and required for Python 3.13):
+#           pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+#           # GPU, CUDA 12.6 (newest drivers):
+#           pip install torch --index-url https://download.pytorch.org/whl/cu126
+#
+#           # GPU, CUDA 12.1 (older drivers, Python <= 3.12 only):
+#           pip install torch --index-url https://download.pytorch.org/whl/cu121
+#
+#           # CPU only:
+#           pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+#       Note: cu121 does NOT publish wheels for Python 3.13. Use cu124 or
+#       cu126 on Python 3.13.
+#
+#       For an always-current lookup, use the official selector at
+#       https://pytorch.org/get-started/locally/
+#
+#       Then run:
+#           pip install -r requirements_video_censor.txt
+
+openai-whisper>=20231117
+torch>=2.0
+nltk>=3.8
+
+# Optional: enables the "Faster Whisper" transcription engine in the GUI.
+# Uses CTranslate2 for roughly 4-8x faster transcription on the same
+# hardware. If not installed, only the "OpenAI Whisper" engine will work.
+faster-whisper>=1.0.0

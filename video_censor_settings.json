@@ -1,0 +1,17 @@
+{
+  "queue_paths": [
+    "C:\\Temp\\vidclean\\inputs\\Tests\\test.mp4"
+  ],
+  "wordlist_path": "C:\\Temp\\Python\\VidClean\\censor_words.txt",
+  "ffmpeg_dir": "C:\\ffmpeg\\bin",
+  "model_size": "medium.en",
+  "device": "Auto",
+  "engine": "faster-whisper",
+  "model_path": "C:\\models\\faster-whisper-medium.en",
+  "mode": "mute",
+  "pre_pad_ms": 150,
+  "post_pad_ms": 50,
+  "audio_delay_ms": 0,
+  "output_mode": "add_track",
+  "use_transcript_cache": true
+}
