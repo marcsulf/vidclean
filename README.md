@@ -95,9 +95,23 @@ for the final mute/beep encode, so both binaries must be reachable.
 
 **macOS**: `brew install ffmpeg` (Homebrew).
 
-**Linux**: use your distro's package manager, e.g. `sudo apt install
-ffmpeg` on Debian/Ubuntu or `sudo dnf install ffmpeg` on Fedora (after
-enabling RPM Fusion).
+**Linux**: install both the Tkinter runtime and FFmpeg via your distro.
+For Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install python3-tk ffmpeg
+```
+
+For Fedora:
+
+```bash
+sudo dnf install python3-tkinter ffmpeg
+```
+
+If you prefer a source-based or alternative Linux package, the key
+requirements are the same: `python3-tk` (Tkinter runtime for the GUI) and
+`ffmpeg`/`ffprobe` on PATH.
 
 Verify from a shell:
 

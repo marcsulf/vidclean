@@ -617,8 +617,9 @@ class _augmented_path_for_ffmpeg:
         # If they pointed at a file, use its parent directory.
         if p.is_file():
             p = p.parent
+        exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
         # A folder that is not itself the bin dir but contains one:
-        if p.is_dir() and not (p / "ffmpeg.exe").exists() and (p / "bin" / "ffmpeg.exe").exists():
+        if p.is_dir() and not (p / exe_name).exists() and (p / "bin" / exe_name).exists():
             p = p / "bin"
         if not p.is_dir():
             return self

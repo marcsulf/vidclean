@@ -1,5 +1,9 @@
 # Video Audio Censor Tool — Python requirements
 #
+# NOTE: On Linux, install system dependencies before using the tool.
+#       Ubuntu/Debian: sudo apt install python3-tk ffmpeg
+#       Fedora: sudo dnf install python3-tkinter ffmpeg
+#
 # NOTE: ffmpeg (and ffprobe) must also be installed and on the system PATH.
 #       Install from https://www.gyan.dev/ffmpeg/builds/ on Windows or via
 #       your package manager on Linux / macOS.

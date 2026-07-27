@@ -27,6 +27,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from censor_timestamps import WordSpan, build_mute_intervals, flatten_transcript_words  # noqa: E402
+from censor_transcribe import _augmented_path_for_ffmpeg  # noqa: E402
 from censor_wordlist import (  # noqa: E402
     WordMatcher,
     build_matcher,
@@ -102,6 +103,25 @@ class TestWordlistSaveLoad(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "nope.txt"
             self.assertEqual(load_wordlist(p), [])
+
+
+class TestAugmentedPathForFFmpeg(unittest.TestCase):
+    def setUp(self) -> None:
+        self._old_path = os.environ.get("PATH", "")
+
+    def tearDown(self) -> None:
+        os.environ["PATH"] = self._old_path
+
+    def test_nested_bin_dir_works_on_current_platform(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "ffmpeg_root"
+            bin_dir = root / "bin"
+            bin_dir.mkdir(parents=True)
+            binary_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+            (bin_dir / binary_name).write_text("", encoding="utf-8")
+
+            with _augmented_path_for_ffmpeg(root):
+                self.assertEqual(str(bin_dir), os.environ["PATH"].split(os.pathsep)[0])
 
 
 @unittest.skipUnless(NLTK_OK, "NLTK / wordnet not available")
