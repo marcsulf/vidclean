@@ -44,8 +44,16 @@ DEFAULT_WORDLIST_HEADER = (
 )
 
 
-def _to_windows_path(p: str) -> str:
-    return str(p).replace("/", os.sep)
+def _normalize_path_display(p: str) -> str:
+    """Normalize path separators for display so Windows-style backslashes
+    round-trip correctly on Linux and vice-versa.
+
+    On Linux this converts ``\\`` → ``/``; on Windows it converts ``/`` → ``\\``.
+    Python's :class:`pathlib.Path` already understands both separator styles,
+    but the raw string shown in dialogs / log messages should use the native
+    platform separator for readability.
+    """
+    return str(p).replace("\\", os.sep).replace("/", os.sep)
 
 
 class VideoCensorGUI:
@@ -68,7 +76,7 @@ class VideoCensorGUI:
         self._queue_results: list[tuple[str, str, Optional[BaseException]]] = []  # (input, output_or_msg, exc)
 
         # --- Variables --------------------------------------------------------
-        self.var_wordlist = tk.StringVar(value=_to_windows_path(DEFAULT_WORDLIST))
+        self.var_wordlist = tk.StringVar(value=_normalize_path_display(DEFAULT_WORDLIST))
         self.var_ffmpeg_dir = tk.StringVar()
         self.var_model = tk.StringVar(value="medium")
         self.var_device = tk.StringVar(value="Auto")
@@ -80,6 +88,9 @@ class VideoCensorGUI:
         self.var_audio_delay_ms = tk.IntVar(value=0)
         self.var_output_mode = tk.StringVar(value="replace")
         self.var_use_cache = tk.BooleanVar(value=True)
+        # Remote transcription settings
+        self.var_remote_server_url = tk.StringVar(value="")
+        self.var_remote_api_key = tk.StringVar(value="")
         self.var_status = tk.StringVar(value="Idle.")
         self.var_phase = tk.StringVar(value="")
         self.var_queue_status = tk.StringVar(value="")
@@ -159,14 +170,14 @@ class VideoCensorGUI:
         cmb_engine = ttk.Combobox(
             settings,
             textvariable=self.var_engine,
-            values=("OpenAI Whisper", "Faster Whisper"),
+            values=("OpenAI Whisper", "Faster Whisper", "Remote Server"),
             state="readonly",
             width=16,
         )
         cmb_engine.grid(row=0, column=1, columnspan=2, sticky="w", padx=6)
         ttk.Label(
             settings,
-            text="'Faster Whisper' uses CTranslate2 for ~4-8x faster transcription",
+            text="'Remote Server' offloads transcription to an external GPU (see URL field below)",
             foreground="#555",
         ).grid(row=0, column=3, columnspan=8, sticky="w", padx=6)
 
@@ -272,6 +283,32 @@ class VideoCensorGUI:
             text="'Add as additional track' switches container to .mp4 for .webm/.ogv/.flv/.avi inputs.",
             foreground="#555",
         ).grid(row=5, column=7, columnspan=4, sticky="w", padx=6, pady=(2, 4))
+
+        # Seventh settings row: remote transcription server URL.
+        ttk.Label(
+            settings, text="Remote GPU server:"
+        ).grid(row=6, column=0, sticky="w", padx=6, pady=(2, 4))
+        self.entry_remote_url = ttk.Entry(settings, width=45)
+        self.entry_remote_url.grid(row=6, column=1, columnspan=3, sticky="ew", padx=6, pady=(2, 4))
+        self.entry_remote_url.config(textvariable=self.var_remote_server_url)
+        ttk.Label(
+            settings,
+            text='e.g. http://shakespeare.whitmore4792:18120  (leave blank for local)',
+            foreground="#555",
+        ).grid(row=6, column=4, columnspan=6, sticky="w", padx=6, pady=(2, 4))
+
+        # Eighth settings row: remote transcription API key.
+        ttk.Label(
+            settings, text="Server API key:"
+        ).grid(row=7, column=0, sticky="w", padx=6, pady=(2, 4))
+        self.entry_remote_api_key = ttk.Entry(settings, width=45, show="*")
+        self.entry_remote_api_key.grid(row=7, column=1, columnspan=3, sticky="ew", padx=6, pady=(2, 4))
+        self.entry_remote_api_key.config(textvariable=self.var_remote_api_key)
+        ttk.Label(
+            settings,
+            text="Bearer token for remote auth (left blank if not used)",
+            foreground="#555",
+        ).grid(row=7, column=4, columnspan=6, sticky="w", padx=6, pady=(2, 4))
 
         # --- Word list editor -----------------------------------------------
         wl_frame = ttk.LabelFrame(
@@ -379,7 +416,7 @@ class VideoCensorGUI:
             return
         existing = set(self._queue_items())
         for p in paths:
-            wp = _to_windows_path(p)
+            wp = _normalize_path_display(p)
             if wp in existing:
                 continue
             self.lst_queue.insert("end", wp)
@@ -443,17 +480,17 @@ class VideoCensorGUI:
             initialfile=Path(current).name if current else "censor_words.txt",
         )
         if path:
-            self.var_wordlist.set(_to_windows_path(path))
+            self.var_wordlist.set(_normalize_path_display(path))
             self._reload_wordlist_into_editor()
 
     def _browse_ffmpeg_dir(self) -> None:
         initial = self.var_ffmpeg_dir.get().strip()
         path = filedialog.askdirectory(
-            title="Select folder containing ffmpeg.exe and ffprobe.exe",
+            title="Select folder containing ffmpeg and ffprobe",
             initialdir=initial or "",
         )
         if path:
-            self.var_ffmpeg_dir.set(_to_windows_path(path))
+            self.var_ffmpeg_dir.set(_normalize_path_display(path))
 
     def _browse_model_path(self) -> None:
         """Pick a local folder that contains a downloaded Whisper model."""
@@ -463,7 +500,7 @@ class VideoCensorGUI:
             initialdir=initial or "",
         )
         if path:
-            self.var_model_path.set(_to_windows_path(path))
+            self.var_model_path.set(_normalize_path_display(path))
 
     def _detect_ffmpeg(self) -> None:
         """Try to locate ffmpeg using the current field or PATH."""
@@ -488,12 +525,12 @@ class VideoCensorGUI:
         parent = str(Path(ffmpeg).parent)
         messagebox.showinfo(
             "FFmpeg detected",
-            f"ffmpeg:  {_to_windows_path(ffmpeg)}\n"
-            f"ffprobe: {_to_windows_path(ffprobe)}",
+            f"ffmpeg:  {_normalize_path_display(ffmpeg)}\n"
+            f"ffprobe: {_normalize_path_display(ffprobe)}",
         )
         if not current:
             # Offer to remember the location so future runs don't re-scan PATH.
-            self.var_ffmpeg_dir.set(_to_windows_path(parent))
+            self.var_ffmpeg_dir.set(_normalize_path_display(parent))
         _ = shutil  # silence unused-import checker
 
     def _reload_wordlist_into_editor(self) -> None:
@@ -505,7 +542,7 @@ class VideoCensorGUI:
                 content = DEFAULT_WORDLIST_HEADER
             self.txt_wordlist.delete("1.0", "end")
             self.txt_wordlist.insert("1.0", content)
-            self.lbl_wl_status.config(text=f"Loaded: {_to_windows_path(path)}" if path else "New list")
+            self.lbl_wl_status.config(text=f"Loaded: {_normalize_path_display(path)}" if path else "New list")
         except OSError as exc:
             messagebox.showerror("Load failed", f"Could not read '{path}':\n{exc}")
 
@@ -516,7 +553,7 @@ class VideoCensorGUI:
             return
         try:
             Path(path).write_text(self.txt_wordlist.get("1.0", "end-1c"), encoding="utf-8")
-            self.lbl_wl_status.config(text=f"Saved: {_to_windows_path(path)}")
+            self.lbl_wl_status.config(text=f"Saved: {_normalize_path_display(path)}")
         except OSError as exc:
             messagebox.showerror("Save failed", f"Could not write '{path}':\n{exc}")
 
@@ -528,7 +565,7 @@ class VideoCensorGUI:
         )
         if not path:
             return
-        self.var_wordlist.set(_to_windows_path(path))
+        self.var_wordlist.set(_normalize_path_display(path))
         self._save_wordlist()
 
     def _download_nltk_data(self) -> None:
@@ -557,6 +594,8 @@ class VideoCensorGUI:
         label = (self.var_engine.get() or "").strip().lower()
         if label in {"faster whisper", "faster-whisper", "faster_whisper"}:
             return "faster-whisper"
+        if label in {"remote server", "remote-server", "remote"}:
+            return "remote"
         return "openai-whisper"
 
     def _refresh_cache_status(self) -> None:
@@ -600,20 +639,20 @@ class VideoCensorGUI:
             cp = cache_path_for(input_video)
             if not cp.exists():
                 messagebox.showinfo(
-                    "Cache", f"No cached transcript found at:\n{_to_windows_path(str(cp))}"
+                    "Cache", f"No cached transcript found at:\n{_normalize_path_display(str(cp))}"
                 )
                 self._refresh_cache_status()
                 return
             if not messagebox.askyesno(
                 "Delete cached transcript",
-                f"Delete this file?\n{_to_windows_path(str(cp))}",
+                f"Delete this file?\n{_normalize_path_display(str(cp))}",
             ):
                 return
             if clear_cache(input_video):
                 self._append_log(f"Deleted cached transcript: {cp}")
             else:
                 messagebox.showerror(
-                    "Delete failed", f"Could not delete {_to_windows_path(str(cp))}"
+                    "Delete failed", f"Could not delete {_normalize_path_display(str(cp))}"
                 )
         finally:
             self._refresh_cache_status()
@@ -635,7 +674,7 @@ class VideoCensorGUI:
         # obvious like a missing file.
         missing = [p for p in queue_items if not Path(p).exists()]
         if missing:
-            msg = "\n".join(_to_windows_path(p) for p in missing[:10])
+            msg = "\n".join(_normalize_path_display(p) for p in missing[:10])
             if len(missing) > 10:
                 msg += f"\n... and {len(missing) - 10} more"
             messagebox.showerror(
@@ -700,6 +739,8 @@ class VideoCensorGUI:
             output_mode=self.var_output_mode.get().strip() or "replace",
             ffmpeg_dir=self.var_ffmpeg_dir.get().strip(),
             use_transcript_cache=bool(self.var_use_cache.get()),
+            remote_server_url=self.var_remote_server_url.get().strip(),
+            remote_api_key=self.var_remote_api_key.get().strip(),
         )
 
     def _on_cancel(self) -> None:
@@ -828,7 +869,7 @@ class VideoCensorGUI:
                     n_int = len(result.intervals)
                     self._append_log(
                         f"Done. {result.words_matched} matched of {result.words_transcribed} words; "
-                        f"{n_int} interval(s). Output: {_to_windows_path(result.output_video)}"
+                        f"{n_int} interval(s). Output: {_normalize_path_display(result.output_video)}"
                     )
                 elif kind == "batch_done":
                     self._on_batch_done(payload)  # type: ignore[arg-type]
@@ -887,7 +928,7 @@ class VideoCensorGUI:
             return
         if not messagebox.askyesno(
             "Clear log file",
-            f"Delete all contents of\n{_to_windows_path(str(path))} ?",
+            f"Delete all contents of\n{_normalize_path_display(str(path))} ?",
         ):
             return
         try:
@@ -986,7 +1027,7 @@ class VideoCensorGUI:
         messagebox.showinfo(
             "Censoring complete",
             f"{cache_line}"
-            f"Wrote:\n{_to_windows_path(result.output_video)}\n\n"
+            f"Wrote:\n{_normalize_path_display(result.output_video)}\n\n"
             f"Muted intervals: {len(result.intervals)}\n"
             f"Matched words: {result.words_matched} of {result.words_transcribed}",
         )
@@ -1026,6 +1067,8 @@ class VideoCensorGUI:
             "audio_delay_ms": int(self.var_audio_delay_ms.get()),
             "output_mode": self.var_output_mode.get().strip() or "replace",
             "use_transcript_cache": bool(self.var_use_cache.get()),
+            "remote_server_url": self.var_remote_server_url.get().strip(),
+            "remote_api_key": self.var_remote_api_key.get().strip(),
         }
 
     def _load_settings(self) -> None:
@@ -1045,7 +1088,7 @@ class VideoCensorGUI:
         self.lst_queue.delete(0, "end")
         for path in queued:
             if path:
-                self.lst_queue.insert("end", _to_windows_path(path))
+                self.lst_queue.insert("end", _normalize_path_display(path))
         # Wordlist path: prefer the stored value when the file still exists;
         # otherwise fall back to the script-relative default so a moved or
         # renamed install still points at a real file on first launch.
@@ -1054,8 +1097,8 @@ class VideoCensorGUI:
             wl = stored_wl
         else:
             wl = DEFAULT_WORDLIST
-        self.var_wordlist.set(_to_windows_path(wl))
-        self.var_ffmpeg_dir.set(_to_windows_path(data.get("ffmpeg_dir", "")))
+        self.var_wordlist.set(_normalize_path_display(wl))
+        self.var_ffmpeg_dir.set(_normalize_path_display(data.get("ffmpeg_dir", "")))
         self.var_model.set(data.get("model_size", "medium"))
         self.var_device.set(data.get("device", "Auto"))
         # Backward-compat: caches/settings predating engine selection
@@ -1063,9 +1106,11 @@ class VideoCensorGUI:
         stored_engine = str(data.get("engine", "openai-whisper")).lower()
         if stored_engine == "faster-whisper":
             self.var_engine.set("Faster Whisper")
+        elif stored_engine == "remote":
+            self.var_engine.set("Remote Server")
         else:
             self.var_engine.set("OpenAI Whisper")
-        self.var_model_path.set(_to_windows_path(str(data.get("model_path", "") or "")))
+        self.var_model_path.set(_normalize_path_display(str(data.get("model_path", "") or "")))
         self.var_mode.set(data.get("mode", "mute"))
         # Backward-compat: an older settings file only had "pad_ms" (symmetric).
         # Use it for the post-pad default, but keep the new 150 ms pre-pad
@@ -1095,6 +1140,9 @@ class VideoCensorGUI:
             stored_output_mode = "replace"
         self.var_output_mode.set(stored_output_mode)
         self.var_use_cache.set(bool(data.get("use_transcript_cache", True)))
+        # Remote transcription settings (new fields — backward compat defaults to empty).
+        self.var_remote_server_url.set(str(data.get("remote_server_url", "") or "").strip())
+        self.var_remote_api_key.set(str(data.get("remote_api_key", "") or "").strip())
 
     def _save_settings(self) -> None:
         try:

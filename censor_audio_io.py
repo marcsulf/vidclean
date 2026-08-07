@@ -134,6 +134,79 @@ def extract_audio_wav(
     _run_ffmpeg_with_progress(cmd, total_duration_s, log, progress, cancel_check)
 
 
+def extract_audio_stream(
+    video_path: str | Path,
+    out_path: str | Path,
+    ffmpeg_dir: str | Path | None = None,
+    log: Optional[LogCB] = None,
+) -> str:
+    """Extract the native audio stream from ``video_path`` without re-encoding.
+
+    Uses ``ffmpeg -acodec copy`` so no decompression to WAV is needed. The
+    output format matches whatever codec was embedded in the source container
+    (AAC, Opus, MP3, etc.). This is ideal for sending audio to a remote server
+    because it avoids the bandwidth overhead of a full uncompressed WAV and
+    lets Whisper decode any compressed format directly.
+
+    Parameters
+    ----------
+    video_path :
+        Source video file path.
+    out_path :
+        Desired output path (suffix will be chosen automatically if empty).
+    ffmpeg_dir :
+        Optional folder containing ffmpeg binaries.
+    log :
+        Optional log callback.
+
+    Returns
+    -------
+    str
+        The absolute path to the extracted audio file.
+
+    Raises
+    ------
+    FFmpegError
+        If ffmpeg fails or no audio stream is found.
+    """
+    ffmpeg = _resolve_binary("ffmpeg", ffmpeg_dir)
+    out_path = str(out_path) or str(Path(video_path).with_suffix(".aac"))
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-i",
+        str(video_path),
+        "-vn",  # no video
+        "-acodec",
+        "copy",  # stream copy — no re-encoding
+        out_path,
+    ]
+
+    if log:
+        log("Extracting audio stream (codec copy) with ffmpeg...")
+
+    try:
+        raw = subprocess.check_output(
+            cmd, stderr=subprocess.STDOUT, timeout=300
+        )
+    except subprocess.CalledProcessError as exc:
+        raise FFmpegError(
+            f"ffmpeg failed extracting audio stream: "
+            f"{exc.output.decode(errors='replace')}"
+        ) from exc
+
+    if not Path(out_path).exists():
+        raise FFmpegError(f"ffmpeg did not produce output file '{out_path}'.")
+
+    return out_path
+
+
 def _run_ffmpeg_with_progress(
     cmd: Sequence[str],
     total_duration_s: float | None,
@@ -539,6 +612,17 @@ def make_temp_wav_path(input_video: str | Path) -> str:
     """Return a scratch WAV path alongside the input video."""
     p = Path(input_video)
     return str(p.with_name(f".{p.stem}_censor_tmp.wav"))
+
+
+def make_temp_stream_path(input_video: str | Path) -> str:
+    """Return a scratch compressed-audio-stream path alongside the input video.
+
+    Used for extracting native codec streams (via ``extract_audio_stream``)
+    before uploading to a remote transcription server. Defaults to an
+    ``.aac`` extension; Whisper will decode whatever container arrives.
+    """
+    p = Path(input_video)
+    return str(p.with_name(f".{p.stem}_censor_tmp.aac"))
 
 
 def cleanup_temp_file(path: str | Path) -> None:

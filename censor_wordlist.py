@@ -89,9 +89,10 @@ def ensure_nltk_data(log: "Callable[[str], None] | None" = None) -> None:
             "    python -m nltk.downloader wordnet omw-1.4\n\n"
             "If that also fails (e.g. SSL / proxy errors), download the .zip files\n"
             "from https://www.nltk.org/nltk_data/ and extract them into one of:\n"
-            "    %APPDATA%\\nltk_data\\corpora\\\n"
-            "    C:\\nltk_data\\corpora\\\n"
-            "so that e.g. 'wordnet.zip' becomes '<path>\\corpora\\wordnet\\'."
+            "    ~/.nltk/corpora/                          (Unix/Linux/macOS)\n"
+            "    %APPDATA%\\nltk_data\\corpora\\              (Windows)\n"
+            "    C:\\nltk_data\\corpora\\                      (Windows alt.)\n"
+            "so that e.g. 'wordnet.zip' becomes '<path>/corpora/wordnet/'."
         )
     if log:
         log("NLTK data downloaded successfully.")

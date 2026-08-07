@@ -28,6 +28,8 @@ from censor_audio_io import (
     adjust_output_path_for_mode,
     cleanup_temp_file,
     extract_audio_wav,
+    extract_audio_stream,
+    make_temp_stream_path,
     make_temp_wav_path,
     probe_duration_s,
     run_censor_encode,
@@ -56,7 +58,7 @@ class PipelineConfig:
     wordlist_path: str = "censor_words.txt"
     model_size: str = "medium"
     device: str = "auto"  # "auto" | "cuda" | "cpu"
-    engine: str = "openai-whisper"  # "openai-whisper" | "faster-whisper"
+    engine: str = "openai-whisper"  # "openai-whisper" | "faster-whisper" | "remote"
     model_path: str = ""  # optional local dir or HF repo id; overrides model_size when set
     mode: str = "mute"  # "mute" | "beep"
     pre_pad_ms: int = 150
@@ -67,6 +69,8 @@ class PipelineConfig:
     ffmpeg_dir: str = ""  # optional folder containing ffmpeg/ffprobe binaries
     use_transcript_cache: bool = True
     force_retranscribe: bool = False
+    remote_server_url: str = ""  # base URL for remote engine (e.g. http://shakespeare:18120)
+    remote_api_key: str = ""  # bearer token for remote auth
 
     def resolve(self) -> "PipelineConfig":
         out = self.output_video.strip() or safe_default_output_path(self.input_video)
@@ -93,6 +97,8 @@ class PipelineConfig:
             ffmpeg_dir=self.ffmpeg_dir.strip(),
             use_transcript_cache=bool(self.use_transcript_cache),
             force_retranscribe=bool(self.force_retranscribe),
+            remote_server_url=self.remote_server_url.strip(),
+            remote_api_key=self.remote_api_key.strip(),
         )
 
 
@@ -146,7 +152,15 @@ def run_pipeline(
     if cfg.use_transcript_cache and not cfg.force_retranscribe:
         try:
             cache_identifier = cfg.model_path.strip() or cfg.model_size
-            cached = load_cache(cfg.input_video, cache_identifier, engine=cfg.engine)
+            # For remote engine, pass server_url for identity matching.
+            # The remote_model_version is not known until transcription completes,
+            # so we skip it here — the save step will record it for next time.
+            cached = load_cache(
+                cfg.input_video,
+                cache_identifier,
+                engine=cfg.engine,
+                server_url=cfg.remote_server_url if cfg.engine == "remote" else "",
+            )
         except Exception:  # noqa: BLE001 - never let cache errors block a run
             cached = None
 
@@ -255,23 +269,39 @@ def run_pipeline(
             else:
                 log("Transcript cache disabled; running full transcription.")
 
-            wav_path = make_temp_wav_path(cfg.input_video)
+            # Remote engine uses compressed stream copy (no WAV decompression).
+            is_remote = cfg.engine == "remote"
+            if is_remote:
+                audio_path = make_temp_stream_path(cfg.input_video)
+            else:
+                audio_path = make_temp_wav_path(cfg.input_video)
+
             try:
-                extract_audio_wav(
-                    cfg.input_video,
-                    wav_path,
-                    total_duration_s=duration_s,
-                    log=log,
-                    progress=lambda elapsed, total: _emit(elapsed / total if total else 0.0, "extract"),
-                    cancel_check=cancel_check,
-                    ffmpeg_dir=cfg.ffmpeg_dir or None,
-                )
+                # Extract phase
+                if is_remote:
+                    extract_audio_stream(
+                        cfg.input_video,
+                        audio_path,
+                        ffmpeg_dir=cfg.ffmpeg_dir or None,
+                        log=log,
+                    )
+                else:
+                    extract_audio_wav(
+                        cfg.input_video,
+                        audio_path,
+                        total_duration_s=duration_s,
+                        log=log,
+                        progress=lambda elapsed, total: _emit(elapsed / total if total else 0.0, "extract"),
+                        cancel_check=cancel_check,
+                        ffmpeg_dir=cfg.ffmpeg_dir or None,
+                    )
                 _emit(1.0, "extract")
                 completed_fraction += phase_weights["extract"]
                 _raise_if_cancelled()
 
+                # Transcribe phase
                 fresh = transcribe(
-                    wav_path=wav_path,
+                    wav_path=audio_path,
                     model_size=cfg.model_size,
                     device=cfg.device,
                     engine=cfg.engine,
@@ -281,12 +311,14 @@ def run_pipeline(
                     progress=lambda elapsed, total: _emit(elapsed / total if total else 0.0, "transcribe"),
                     cancel_check=cancel_check,
                     ffmpeg_dir=cfg.ffmpeg_dir or None,
+                    remote_server_url=cfg.remote_server_url,
+                    remote_api_key=cfg.remote_api_key,
                 )
                 _emit(1.0, "transcribe")
                 completed_fraction += phase_weights["transcribe"]
                 _raise_if_cancelled()
             finally:
-                cleanup_temp_file(wav_path)
+                cleanup_temp_file(audio_path)
 
             transcription_words = fresh.words
             transcription_language = fresh.detected_language
@@ -302,6 +334,8 @@ def run_pipeline(
                         detected_language=fresh.detected_language,
                         duration_s=duration_s,
                         engine=cfg.engine,
+                        server_url=cfg.remote_server_url if is_remote else "",
+                        remote_model_version=getattr(fresh, "remote_model_version", ""),
                     )
                     log(f"Saved transcript cache: {written}")
                 except OSError as exc:

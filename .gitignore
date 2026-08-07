@@ -220,3 +220,15 @@ __marimo__/
 # Local generated files
 *.log
 test_out.txt
+
+# User-specific settings (contains server URLs, API keys, engine preferences)
+video_censor_settings.json
+
+# Test media and outputs (videos, audio, transcripts — can be large)
+inputs/
+*.transcript.json
+
+# Accidental pip-install redirect artifacts
+=1.0.0
+=20231117
+=3.8

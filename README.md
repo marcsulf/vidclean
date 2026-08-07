@@ -69,7 +69,7 @@ and produces a copy of the video with those words muted or beeped out.
 
 ### 1. Create and activate a virtual environment
 
-```powershell
+```bash
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
@@ -122,7 +122,7 @@ ffprobe -version
 
 If either command prints "not recognized" / "command not found", the
 binary isn't on your `PATH` — use the **FFmpeg folder** field in the GUI
-to point at the folder that contains `ffmpeg.exe` and `ffprobe.exe`
+to point at the folder that contains `ffmpeg` and `ffprobe`
 instead. The **Detect** button next to that field confirms both binaries
 resolve.
 
@@ -178,11 +178,10 @@ may fail with a `Resource 'wordnet' not found` error. Fixes, in order:
    <https://www.nltk.org/nltk_data/> and extract them so you end up with
    these folders:
    ```
-   %APPDATA%\nltk_data\corpora\wordnet\
-   %APPDATA%\nltk_data\corpora\omw-1.4\
+   ~/.nltk/corpora/wordnet/
+   ~/.nltk/corpora/omw-1.4/
    ```
-   (or use `C:\nltk_data\corpora\...` — either location is picked up
-   automatically by NLTK).
+   (Windows: `%APPDATA%\nltk_data\corpora\...` also works)
 
 ## Usage
 
@@ -194,7 +193,7 @@ python video_censor_gui.py
 2. **Output video** — Auto-fills to `<inputname>_censored.<ext>`; edit if desired.
 3. **Censor words file** — path to the editable list; the editor pane below shows its contents.
 4. **FFmpeg folder** *(optional)* — leave blank to use PATH. Otherwise pick
-   the folder that contains `ffmpeg.exe` and `ffprobe.exe` (a `bin/`
+   the folder that contains `ffmpeg` and `ffprobe` (a `bin/`
    subfolder inside it is also checked). The **Detect** button verifies the
    setting and reports where the binaries were found.
 5. **Whisper model** — default `medium`. Larger = more accurate, slower.

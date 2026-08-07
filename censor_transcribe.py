@@ -45,7 +45,7 @@ AVAILABLE_MODELS = (
 )
 
 # Canonical engine identifiers, stored in settings and the transcript cache.
-AVAILABLE_ENGINES = ("openai-whisper", "faster-whisper")
+AVAILABLE_ENGINES = ("openai-whisper", "faster-whisper", "remote")
 
 
 def _normalize_engine(engine: str | None) -> str:
@@ -57,6 +57,8 @@ def _normalize_engine(engine: str | None) -> str:
         return "openai-whisper"
     if e in {"faster-whisper", "faster", "fasterwhisper"}:
         return "faster-whisper"
+    if e in {"remote", "remote-server", "remotewhisper", "http-whisper"}:
+        return "remote"
     return e  # unknown; will error later
 
 
@@ -446,6 +448,8 @@ class TranscriptionResult:
     words: List[WordSpan]
     detected_language: str
     duration_s: float
+    # Set when engine == "remote" so the cache can include it in its identity key.
+    remote_model_version: str = ""
 
 
 def resolve_device(requested: str = "auto", log: Optional[LogCB] = None) -> str:
@@ -498,7 +502,12 @@ def preload_model(
     Call this once before a batch so the model-load cost (which can be
     5-20 s for medium and even longer for large) isn't rolled into the
     first file's progress bar / ETA.
+
+    For ``engine == "remote"``, this is a no-op since there is no local
+    model to preload.
     """
+    if _normalize_engine(engine) == "remote":
+        return
     resolved_device = resolve_device(device, log=log)
     _get_or_load_model(engine, model_size, resolved_device, log=log, model_path=model_path)
 
@@ -514,12 +523,17 @@ def transcribe(
     progress: Optional[ProgressCB] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     ffmpeg_dir: str | None = None,
+    remote_server_url: str = "",
+    remote_api_key: str = "",
 ) -> TranscriptionResult:
     """Transcribe ``wav_path`` and return word-level spans.
 
-    ``engine`` selects the backend: ``"openai-whisper"`` (default) or
-    ``"faster-whisper"``. Both engines return the same
-    :class:`TranscriptionResult` shape so downstream code doesn't care.
+    ``engine`` selects the backend: ``"openai-whisper"`` (default),
+    ``"faster-whisper"``, or ``"remote"``. The remote engine uploads audio
+    to an external GPU server and polls for completion.
+
+    When ``engine == "remote"``, pass ``remote_server_url`` and
+    ``remote_api_key`` with the base URL and bearer token respectively.
 
     Progress is emitted after each Whisper segment, based on the segment's
     end time relative to ``total_duration_s`` when available.
@@ -533,6 +547,43 @@ def transcribe(
     ``(engine, model_size, device)`` — as happens across a batch of files —
     pay the model-load cost only once.
     """
+    engine = _normalize_engine(engine)
+
+    # --- Remote-engine branch: offload to external GPU server -------------
+    if engine == "remote":
+        from remote_transcribe import RemoteEngineClient, RemoteTranscriptionError
+
+        client = RemoteEngineClient(server_url=remote_server_url, api_key=remote_api_key)
+        try:
+            words = client.transcribe(
+                audio_path=wav_path,
+                progress_cb=progress,
+                cancel_check=cancel_check,
+                log=log,
+            )
+        finally:
+            client.close()
+
+        remote_version = ""
+        # Best-effort: fetch server version for cache identity.
+        try:
+            client2 = RemoteEngineClient(
+                server_url=remote_server_url, api_key=remote_api_key
+            )
+            remote_version = client2.get_server_version()
+            client2.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+        duration = total_duration_s or (words[-1].end if words else 0.0)
+        return TranscriptionResult(
+            words=words,
+            detected_language="en",
+            duration_s=duration,
+            remote_model_version=remote_version,
+        )
+
+    # --- Local-engine branch: load model and transcribe locally -----------
     engine = _normalize_engine(engine)
 
     # Silence the harmless Triton fallback warning that openai-whisper emits

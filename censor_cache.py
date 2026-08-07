@@ -15,7 +15,7 @@ A JSON file next to the input video, named ``<input>.transcript.json``, with:
         "model_size": "medium",
         "language": "en",
         "duration_s": 917.88,
-        "input_path": "C:\\...\\test.mp4",
+        "input_path": "/path/to/video/test.mp4",
         "input_size_bytes": 123456789,
         "input_mtime": 1720368000.123,
         "words": [
@@ -34,6 +34,9 @@ The cache is used only when *all* of the following match the current input:
 * engine (missing engine field is treated as ``"openai-whisper"`` for
   backward compatibility with caches written before engine selection was
   added)
+* **server_url** and **remote_model_version** (only when engine is
+  ``"remote"`` — prevents mixing results from different servers or model
+  versions)
 
 Any mismatch causes a fresh transcription.
 """
@@ -74,6 +77,9 @@ def load_cache(
     input_video: str | Path,
     model_size: str,
     engine: str = "openai-whisper",
+    *,
+    server_url: str = "",
+    remote_model_version: str = "",
 ) -> Optional[CachedTranscript]:
     """Return a cached transcript if one exists and is still valid.
 
@@ -81,6 +87,9 @@ def load_cache(
     A cache is considered stale if the recorded ``engine`` differs from
     the requested one; caches predating engine selection are treated as
     ``"openai-whisper"``.
+
+    When ``engine == "remote"``, the cached ``server_url`` and
+    ``remote_model_version`` must also match (passed as keyword-only args).
     """
     path = cache_path_for(input_video)
     if not path.exists():
@@ -97,6 +106,12 @@ def load_cache(
     cached_engine = str(data.get("engine", "openai-whisper"))
     if cached_engine != str(engine):
         return None
+    # Remote-engine cache must also match server URL and model version.
+    if engine == "remote":
+        if str(data.get("server_url", "")) != str(server_url):
+            return None
+        if str(data.get("remote_model_version", "")) != str(remote_model_version):
+            return None
     try:
         size, mtime = _stat_tuple(input_video)
     except OSError:
@@ -131,15 +146,23 @@ def save_cache(
     detected_language: str,
     duration_s: float,
     engine: str = "openai-whisper",
+    *,
+    server_url: str = "",
+    remote_model_version: str = "",
 ) -> Path:
-    """Write a transcript sidecar for ``input_video``. Returns the path."""
+    """Write a transcript sidecar for ``input_video``. Returns the path.
+
+    When ``engine == "remote"``, pass ``server_url`` and
+    ``remote_model_version`` so future cache hits can verify they match
+    the same server and model version.
+    """
     path = cache_path_for(input_video)
     try:
         size, mtime = _stat_tuple(input_video)
     except OSError:
         # If we cannot stat the source, we cannot make a valid cache.
         raise
-    payload = {
+    payload: dict = {
         "cache_version": CACHE_VERSION,
         "engine": str(engine),
         "model_size": str(model_size),
@@ -153,6 +176,11 @@ def save_cache(
             for w in words
         ],
     }
+    # Store remote-identity fields when using the remote engine so that
+    # caches from different servers or model versions never collide.
+    if engine == "remote":
+        payload["server_url"] = str(server_url)
+        payload["remote_model_version"] = str(remote_model_version)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=1, ensure_ascii=False)
